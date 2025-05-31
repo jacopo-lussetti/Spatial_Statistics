@@ -1,5 +1,5 @@
 ---
-title: "Simulation Scaled Prior"
+title: "Code"
 author: "Jacopo Lussetti & Antonio Panico"
 date: "`r Sys.Date()`"
 output: html_document
