@@ -1,4 +1,4 @@
-install.packages("patchwork")
+#install.packages("patchwork")
 # Load required packages
 library(MASS)
 library(ggplot2)
@@ -75,7 +75,8 @@ p2 <- ggplot(df_rw2, aes(x = index, y = StdDev)) +
   labs(title = "RW2: Second-order IGMRF", x = "Node Index", y = "Marginal Std Dev") +
   theme_minimal()
 
-print(p1 + p2) 
+print(p1 + p2)  #required for patchwork to combine plots
+
 # Compute geometric means (reference std devs)
 sigma_ref_rw1 <- exp(mean(log(std_rw1)))
 sigma_ref_rw2 <- exp(mean(log(std_rw2)))
