@@ -3,8 +3,88 @@ title: "Main"
 output: html_document
 ---
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# upload packages 
+library(spdep)
+
+# Load the LeukSurv dataset
 
 load("LeukSurv.rda")
+head(LeukSurv)
+
+```
 
 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Discretize wbc and tpi into 50 bins each
+
+LeukSurv$wbc_disc <- as.numeric(cut(LeukSurv$wbc, breaks = 50))
+LeukSurv$tpi_disc <- as.numeric(cut(LeukSurv$tpi, breaks = 50))
+
+# Convert categorical variables to factors
+LeukSurv$sex <- as.factor(LeukSurv$sex)
+LeukSurv$district <- as.factor(LeukSurv$district)
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Create district_id as a numeric factor for districts
+
+library(ggplot2)
+
+
+ggplot(LeukSurv, aes(x = xcoord, y = ycoord, color = factor(district))) +
+  geom_point(size = 2, alpha = 0.8) +
+  labs(
+    title = "Spatial Nodes Colored by District",
+    x = "xcoord", y = "ycoord", color = "District"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+```
+
+```{r}
+#let us evaluete the random effect of IGMRF of first orderù
+library(INLA)
+# Model A: Unscaled
+formulaA <- inla.surv(time, cens) ~ sex + age +
+  f(wbc_disc, model = "rw2", scale.model = FALSE) +
+  f(tpi_disc, model = "rw2", scale.model = FALSE)
+
+# Model B: Scaled
+formulaB <- inla.surv(time, cens) ~ sex + age +
+  f(wbc_disc, model = "rw2", scale.model = TRUE) +
+  f(tpi_disc, model = "rw2", scale.model = TRUE)
+
+# Model C: Scaled + rescaled hyperpriors
+formulaC <- inla.surv(time, cens) ~ sex + age +
+  f(wbc_disc, model = "rw2", scale.model = TRUE,
+    hyper = list(prec = list(prior = "loggamma", param = c(1, 1.5e-9)))) +
+  f(tpi_disc, model = "rw2", scale.model = TRUE,
+    hyper = list(prec = list(prior = "loggamma", param = c(1, 4e-5))))
+
+fitA <- inla(formulaA, data = LeukSurv, family = "coxph")
+fitB <- inla(formulaB, data = LeukSurv, family = "coxph")
+fitC <- inla(formulaC, data = LeukSurv, family = "coxph")
+
+
+plot(fitA$summary.random$wbc_disc$mean, type = "l", col = "black", ylim = c(-0.5, 1),
+     ylab = "Effect of WBC", xlab = "Index", main = "WBC Effect Comparison")
+lines(fitB$summary.random$wbc_disc$mean, col = "red")
+lines(fitC$summary.random$wbc_disc$mean, col = "blue")
+legend("topright", legend = c("Unscaled", "Scaled", "Rescaled"),
+       col = c("black", "red", "blue"), lty = 1)
+
+plot(fitA$summary.random$tpi_disc$mean, type = "l", col = "black", ylim = c(-.4, .2),
+     ylab = "Effect of TPI", xlab = "Index", main = "TPI Effect Comparison")
+lines(fitB$summary.random$tpi_disc$mean, col = "red")
+lines(fitC$summary.random$tpi_disc$mean, col = "blue")
+legend("topright", legend = c("Unscaled", "Scaled", "Rescaled"),
+       col = c("black", "red", "blue"), lty = 1)
+
+
+
+```
 
