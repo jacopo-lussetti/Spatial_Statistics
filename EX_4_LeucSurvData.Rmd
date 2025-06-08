@@ -44,6 +44,43 @@ ggplot(LeukSurv, aes(x = xcoord, y = ycoord, color = factor(district))) +
 
 
 ```
+```{r}
+library(dplyr)
+library(spdep)
+library(ggplot2)
+
+# 1. Compute district centroids
+district_centroids <- LeukSurv %>%
+  group_by(district) %>%
+  summarise(
+    x = mean(xcoord),
+    y = mean(ycoord)
+  ) %>%
+  ungroup()
+
+# 2. Get coordinates matrix of centroids
+coords_centroids <- as.matrix(district_centroids[, c("x", "y")])
+
+# 3. k-nearest neighbors between districts (e.g. k = 3)
+k <- 3
+knn_districts <- knearneigh(coords_centroids, k = k)
+nb_districts <- knn2nb(knn_districts)
+
+# 4. Convert to edge list for ggplot
+district_edges <- do.call(rbind, lapply(1:length(nb_districts), function(i) {
+  if (length(nb_districts[[i]]) == 0) return(NULL)
+  data.frame(
+    from = district_centroids$district[i],
+    to = district_centroids$district[nb_districts[[i]]],
+    x = coords_centroids[i, 1],
+    y = coords_centroids[i, 2],
+    xend = coords_centroids[nb_districts[[i]], 1],
+    yend = coords_centroids[nb_districts[[i]], 2]
+  )
+}))
+
+
+```
 
 ```{r}
 #let us evaluete the random effect of IGMRF of first orderù
