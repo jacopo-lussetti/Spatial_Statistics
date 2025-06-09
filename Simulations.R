@@ -97,7 +97,7 @@ tpi<-ggplot(data=Leuk, aes(x=tpi))+
   labs(title="Histogram of WBC", x="WBC", y="Frequency")
 tpi
 Leuk$tpi_dst<-cut(Leuk$tpi, breaks=50, labels = FALSE)
-
+range(Leuk$wbc)
 #precision matrix Q= tau (1) x R. so we need to compute then the structure matrix R
 #with rank n-1, where n is the number of nodes (here 50)
 n<-50
@@ -109,7 +109,7 @@ for (i in 1:(n - 1)) {
   R[i + 1, i + 1] <- R[i + 1, i + 1] + 1
 }
 #compute Q
-Q<- R * (1/50)
+Q<- R * (1/500)
 
 #now we are able to compute the reference s.d., thata are defined in formula (7) 
 #from Sorbye, and Rue (2014)
