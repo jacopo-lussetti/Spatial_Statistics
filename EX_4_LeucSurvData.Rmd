@@ -48,6 +48,7 @@ ggplot(LeukSurv, aes(x = xcoord, y = ycoord, color = factor(district))) +
 library(dplyr)
 library(spdep)
 library(ggplot2)
+library(sf)
 
 # 1. Compute district centroids
 district_centroids <- LeukSurv %>%
@@ -58,70 +59,109 @@ district_centroids <- LeukSurv %>%
   ) %>%
   ungroup()
 
-# 2. Get coordinates matrix of centroids
+# 2. Convert centroids to matrix
 coords_centroids <- as.matrix(district_centroids[, c("x", "y")])
 
-# 3. k-nearest neighbors between districts (e.g. k = 3)
+# 3. k-nearest neighbors (e.g. k = 3)
 k <- 3
 knn_districts <- knearneigh(coords_centroids, k = k)
 nb_districts <- knn2nb(knn_districts)
 
-# 4. Convert to edge list for ggplot
-district_edges <- do.call(rbind, lapply(1:length(nb_districts), function(i) {
-  if (length(nb_districts[[i]]) == 0) return(NULL)
-  data.frame(
-    from = district_centroids$district[i],
-    to = district_centroids$district[nb_districts[[i]]],
-    x = coords_centroids[i, 1],
-    y = coords_centroids[i, 2],
-    xend = coords_centroids[nb_districts[[i]], 1],
-    yend = coords_centroids[nb_districts[[i]], 2]
-  )
-}))
+# 4. Function to build edge list
+nb_lines <- function(nb_list, centroids_df) {
+  edges <- do.call(rbind, lapply(1:length(nb_list), function(i) {
+    neighbors <- nb_list[[i]]
+    if (length(neighbors) == 0) return(NULL)
+    do.call(rbind, lapply(neighbors, function(j) {
+      data.frame(
+        x = centroids_df[i, 1],
+        y = centroids_df[i, 2],
+        xend = centroids_df[j, 1],
+        yend = centroids_df[j, 2],
+        group = paste(i, j, sep = "-")
+      )
+    }))
+  }))
+  return(edges)
+}
+
+# 5. Create edges and point data
+edges_df <- nb_lines(nb_districts, coords_centroids)
+points_df <- as.data.frame(coords_centroids)
+colnames(points_df) <- c("x", "y")
+
+# 6. Plot with ggplot2
+ggplot() +
+  geom_segment(data = edges_df, aes(x = x, y = y, xend = xend, yend = yend, group = group),
+               color = "gray60", linewidth = 0.6) +
+  geom_point(data = points_df, aes(x = x, y = y), color = "blue", size = 3) +
+  theme_minimal() +
+  labs(title = "Spatial Neighborhood Structure (k-NN)",
+       x = "Longitude", y = "Latitude")
+
 
 
 ```
+
 
 ```{r}
-#let us evaluete the random effect of IGMRF of first orderù
+
+
 library(INLA)
-# Model A: Unscaled
-formulaA <- inla.surv(time, cens) ~ sex + age +
-  f(wbc_disc, model = "rw2", scale.model = FALSE) +
-  f(tpi_disc, model = "rw2", scale.model = FALSE)
-
-# Model B: Scaled
-formulaB <- inla.surv(time, cens) ~ sex + age +
-  f(wbc_disc, model = "rw2", scale.model = TRUE) +
-  f(tpi_disc, model = "rw2", scale.model = TRUE)
-
-# Model C: Scaled + rescaled hyperpriors
-formulaC <- inla.surv(time, cens) ~ sex + age +
-  f(wbc_disc, model = "rw2", scale.model = TRUE,
-    hyper = list(prec = list(prior = "loggamma", param = c(1, 1.5e-9)))) +
-  f(tpi_disc, model = "rw2", scale.model = TRUE,
-    hyper = list(prec = list(prior = "loggamma", param = c(1, 4e-5))))
-
-fitA <- inla(formulaA, data = LeukSurv, family = "coxph")
-fitB <- inla(formulaB, data = LeukSurv, family = "coxph")
-fitC <- inla(formulaC, data = LeukSurv, family = "coxph")
+library(dplyr)
 
 
-plot(fitA$summary.random$wbc_disc$mean, type = "l", col = "black", ylim = c(-0.5, 1),
-     ylab = "Effect of WBC", xlab = "Index", main = "WBC Effect Comparison")
-lines(fitB$summary.random$wbc_disc$mean, col = "red")
-lines(fitC$summary.random$wbc_disc$mean, col = "blue")
-legend("topright", legend = c("Unscaled", "Scaled", "Rescaled"),
-       col = c("black", "red", "blue"), lty = 1)
 
-plot(fitA$summary.random$tpi_disc$mean, type = "l", col = "black", ylim = c(-.4, .2),
-     ylab = "Effect of TPI", xlab = "Index", main = "TPI Effect Comparison")
-lines(fitB$summary.random$tpi_disc$mean, col = "red")
-lines(fitC$summary.random$tpi_disc$mean, col = "blue")
-legend("topright", legend = c("Unscaled", "Scaled", "Rescaled"),
-       col = c("black", "red", "blue"), lty = 1)
 
+LeukSurv$surv <- inla.surv(LeukSurv$time, LeukSurv$cens)
+
+#----------------------------
+# 3. Discretize Continuous Covariates into 50 Bins
+
+#----------------------------
+# 4. Define Hyperpriors (Gamma(1, b)) from Sørbye & Rue (2014)
+#----------------------------
+hyper_wbc     <- list(prec = list(prior = "gamma", param = c(1, 1.5e-9)))
+hyper_tpi     <- list(prec = list(prior = "gamma", param = c(1, 4.0e-5)))
+hyper_spatial <- list(prec = list(prior = "gamma", param = c(1, 6.1e-4)))
+
+#----------------------------
+# 5. Spatial Structure: Save Graph File
+#----------------------------
+# Ensure district_id is integer and 1-based
+LeukSurv$district_id <- as.integer(as.factor(LeukSurv$district))
+
+# Save spatial adjacency graph (must exist!)
+nb2INLA("district.graph", nb_districts)
+
+#----------------------------
+# 6. Create Time Intervals for Piecewise Constant Baseline
+#----------------------------
+cuts <- seq(0, max(LeukSurv$time), length.out = 50)
+LeukSurv$baseline <- as.integer(cut(LeukSurv$time, breaks = cuts, include.lowest = TRUE))
+
+#----------------------------
+# 7. Define Model Formula
+#----------------------------
+formula <- surv ~
+  f(baseline, model = "rw1", constr = TRUE) +       # Piecewise baseline hazard
+  sex + age +                                       # Fixed effects
+  f(wbc_discrete, model = "rw2", hyper = hyper_wbc, constr = TRUE) +
+  f(tpi_discrete, model = "rw2", hyper = hyper_tpi, constr = TRUE) +
+  f(district_id, model = "besag", graph = "district.graph", hyper = hyper_spatial)
+
+#----------------------------
+# 8. Fit Model with INLA
+#----------------------------
+result <- inla(
+  formula,
+  data = LeukSurv,
+  family = "coxph",
+  control.compute = list(dic = TRUE, waic = TRUE, cpo = TRUE),
+  control.predictor = list(compute = TRUE)
+)
 
 
 ```
+
 
